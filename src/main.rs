@@ -5,23 +5,16 @@ use core::{convert::Infallible, panic::PanicInfo};
 
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 use embedded_time::{rate::Fraction, Clock, Instant};
-use hal::{
-    gpio::PinState,
-    timer::{CounterUs, SysCounterUs},
-};
+use hal::{gpio::PinState, timer::CounterUs};
 use rtt_target::{rprintln, rtt_init_print};
 use stm32f4xx_hal::{
     self as hal,
     otg_fs::{UsbBus as SynopsysBus, UsbBusType, USB},
-    pac::RCC,
-    timer::Error,
 };
-use usb_device::bus::{UsbBus, UsbBusAllocator};
+use usb_device::bus::UsbBusAllocator;
 use usb_device::class_prelude::*;
 use usb_device::device::{UsbDeviceBuilder, UsbVidPid};
-use usbd_human_interface_device::device::keyboard::{
-    KeyboardLedsReport, NKROBootKeyboardInterface,
-};
+use usbd_human_interface_device::device::keyboard::NKROBootKeyboardInterface;
 use usbd_human_interface_device::page::Keyboard;
 use usbd_human_interface_device::prelude::*;
 
@@ -48,12 +41,26 @@ mod keys {
     use super::*;
     use Keyboard::*;
 
-    // change this to switch layout
-    pub const KEYS: [[Keyboard; 6]; 6] = LEFT_KEYS;
+    pub enum KeyMapping {
+        Left([[Keyboard; 6]; 6]),
+        Right([[Keyboard; 6]; 6]),
+        Other,
+    }
 
-    const RIGHT_KEYS: [[Keyboard; 6]; 6] = [
+    impl KeyMapping {
+        pub fn mapping(&self, line: usize, column: usize) -> Keyboard {
+            match self {
+                // Left side of the keyboard was wired from index to pinkie,
+                // which reverses the order.
+                KeyMapping::Left(mapping) => mapping[line][5 - column],
+                KeyMapping::Right(mapping) => mapping[line][column],
+                KeyMapping::Other => NoEventIndicated,
+            }
+        }
+    }
+    pub const RIGHT_KEYS: KeyMapping = KeyMapping::Right([
         [Keyboard6, Keyboard7, Keyboard8, Keyboard9, Keyboard0, Minus],
-        [Y, U, I, O, P, LeftBrace],
+        [Y, U, I, O, P, Backslash],
         [H, J, K, L, Semicolon, Apostrophe],
         [N, M, Comma, Dot, ForwardSlash, RightBrace],
         [
@@ -65,38 +72,36 @@ mod keys {
             NoEventIndicated,
         ],
         [
-            RightControl,
-            RightAlt,
+            LeftBrace,
+            RightBrace,
             Menu,
             Return,
             NoEventIndicated,
             NoEventIndicated,
         ],
-    ];
-    const LEFT_KEYS: [[Keyboard; 6]; 6] = [
+    ]);
+    pub const LEFT_KEYS: KeyMapping = KeyMapping::Left([
+        [Equal, Keyboard1, Keyboard2, Keyboard3, Keyboard4, Keyboard5],
+        [Tab, Q, W, E, R, T],
+        [Grave, A, S, D, F, G],
+        [LeftShift, Z, X, C, V, B],
         [
-            Keyboard5, Keyboard4, Keyboard3, Keyboard2, Keyboard1, Backslash,
-        ],
-        [T, R, E, W, Q, Tab],
-        [G, F, D, S, A, Grave],
-        [B, V, C, X, Z, LeftShift],
-        [
-            LeftControl,
-            DeleteBackspace,
-            RightArrow,
+            NoEventIndicated,
+            NoEventIndicated,
             LeftArrow,
-            NoEventIndicated,
-            NoEventIndicated,
+            RightArrow,
+            DeleteBackspace,
+            LeftControl,
         ],
         [
-            LeftAlt,
-            Escape,
-            End,
+            NoEventIndicated,
+            NoEventIndicated,
             DeleteForward,
-            NoEventIndicated,
-            NoEventIndicated,
+            End,
+            Escape,
+            LeftAlt,
         ],
-    ];
+    ]);
 }
 
 fn iterate_lines() -> ! {
@@ -161,7 +166,7 @@ fn iterate_lines() -> ! {
 
     let mut usb_dev = UsbDeviceBuilder::new(&usb_alloc, UsbVidPid(0x1209, 0x0001))
         .manufacturer("custom-keyboard-dwerner")
-        .product("Custom Keyboard")
+        .product("Dan's Keyboard")
         .serial_number("42")
         .build();
 
@@ -169,18 +174,24 @@ fn iterate_lines() -> ! {
     input_timer.start(10.millis()).unwrap();
 
     let mut tick_timer = dp.TIM3.counter_us(&clocks);
-    tick_timer.start(1.millis()).unwrap();
+    tick_timer.start(500.micros()).unwrap();
 
     rprintln!("starting keyboard");
     loop {
+        // All keys marked as being pressed during this pass.
         let mut keys_pressed: [Keyboard; 6 * 6] = [Keyboard::NoEventIndicated; 6 * 6];
+
         for (line_index, line) in lines.iter_mut().enumerate() {
             line.set_low().unwrap();
 
+            // waiting here eliminates a ghost keypress of the next line.
             nb::block!(tick_timer.wait()).unwrap();
+
             for (col_index, col) in cols.iter().enumerate() {
                 keys_pressed[(col_index * 6) + line_index] = if col.is_low().unwrap() {
-                    let key = keys::KEYS[line_index][col_index];
+                    // Ask the key mapping what key should be written.
+                    let key = keys::LEFT_KEYS.mapping(line_index, col_index);
+                    // let key = keys::RIGHT_KEYS.mapping(line_index, col_index);
                     rprintln!("line: {} col: {} key {:?}", line_index, col_index, key);
                     key
                 } else {
@@ -227,7 +238,6 @@ fn iterate_lines() -> ! {
 fn main() -> ! {
     rtt_init_print!();
     iterate_lines();
-    // iterate_columns();
 }
 
 #[panic_handler]

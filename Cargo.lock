@@ -351,6 +351,7 @@ dependencies = [
  "stm32-usbd",
  "stm32f4xx-hal",
  "usb-device",
+ "usbd-audio",
  "usbd-human-interface-device",
 ]
 
@@ -771,6 +772,15 @@ name = "usb-device"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6be90410d4772074ea49525e2e753b65920b94b57eee21a6ef7b6a6fe6296245"
+
+[[package]]
+name = "usbd-audio"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac88667b47ea82e0cb19b7341d7c4cc7f21f68e5cd4382f090f84c25b4bebc7d"
+dependencies = [
+ "usb-device",
+]
 
 [[package]]
 name = "usbd-human-interface-device"
