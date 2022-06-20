@@ -58,11 +58,12 @@ mod keys {
             }
         }
     }
+
     pub const RIGHT_KEYS: KeyMapping = KeyMapping::Right([
         [Keyboard6, Keyboard7, Keyboard8, Keyboard9, Keyboard0, Minus],
         [Y, U, I, O, P, Backslash],
         [H, J, K, L, Semicolon, Apostrophe],
-        [N, M, Comma, Dot, ForwardSlash, RightBrace],
+        [N, M, Comma, Dot, ForwardSlash, RightShift],
         [
             ReturnEnter,
             Space,
@@ -72,14 +73,15 @@ mod keys {
             NoEventIndicated,
         ],
         [
+            Space,
+            RightControl,
             LeftBrace,
             RightBrace,
-            Menu,
-            Return,
             NoEventIndicated,
             NoEventIndicated,
         ],
     ]);
+
     pub const LEFT_KEYS: KeyMapping = KeyMapping::Left([
         [Equal, Keyboard1, Keyboard2, Keyboard3, Keyboard4, Keyboard5],
         [Tab, Q, W, E, R, T],
@@ -190,8 +192,8 @@ fn iterate_lines() -> ! {
             for (col_index, col) in cols.iter().enumerate() {
                 keys_pressed[(col_index * 6) + line_index] = if col.is_low().unwrap() {
                     // Ask the key mapping what key should be written.
-                    let key = keys::LEFT_KEYS.mapping(line_index, col_index);
-                    // let key = keys::RIGHT_KEYS.mapping(line_index, col_index);
+                    //let key = keys::LEFT_KEYS.mapping(line_index, col_index);
+                    let key = keys::RIGHT_KEYS.mapping(line_index, col_index);
                     rprintln!("line: {} col: {} key {:?}", line_index, col_index, key);
                     key
                 } else {
