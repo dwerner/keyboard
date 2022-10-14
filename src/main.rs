@@ -21,7 +21,7 @@ use usbd_human_interface_device::prelude::*;
 use crate::hal::{pac, prelude::*};
 
 struct DeviceClock {
-    timer: CounterUs<pac::TIM1>,
+    timer: CounterUs<pac::TIM2>,
 }
 
 impl Clock for DeviceClock {
@@ -44,6 +44,7 @@ mod keys {
     pub enum KeyMapping {
         Left([[Keyboard; 6]; 6]),
         Right([[Keyboard; 6]; 6]),
+        MacroPad([[Keyboard; 5]; 5]),
         Other,
     }
 
@@ -54,6 +55,7 @@ mod keys {
                 // which reverses the order.
                 KeyMapping::Left(mapping) => mapping[line][5 - column],
                 KeyMapping::Right(mapping) => mapping[line][column],
+                KeyMapping::MacroPad(mapping) => mapping[line][column],
                 KeyMapping::Other => NoEventIndicated,
             }
         }
@@ -104,6 +106,14 @@ mod keys {
             LeftAlt,
         ],
     ]);
+
+    pub const MACRO_PAD_KEYS: KeyMapping = KeyMapping::MacroPad([
+        [A, B, C, D, E],
+        [F, G, H, I, J],
+        [K, L, M, N, O],
+        [P, Q, R, S, T],
+        [U, V, W, X, Y],
+    ]);
 }
 
 fn iterate_lines() -> ! {
@@ -117,29 +127,26 @@ fn iterate_lines() -> ! {
         .freeze();
 
     let device_clock = DeviceClock {
-        timer: dp.TIM1.counter_us(&clocks),
+        timer: dp.TIM2.counter_us(&clocks),
     };
 
     let gpioa = dp.GPIOA.split();
     let gpiob = dp.GPIOB.split();
+    let gpioc = dp.GPIOC.split();
 
-    let mut line_0 = gpiob.pb0.into_open_drain_output_in_state(PinState::High);
-    let mut line_1 = gpioa.pa7.into_open_drain_output_in_state(PinState::High);
-    let mut line_2 = gpioa.pa15.into_open_drain_output_in_state(PinState::High);
-    let mut line_3 = gpiob.pb13.into_open_drain_output_in_state(PinState::High);
-    let mut line_4 = gpiob.pb14.into_open_drain_output_in_state(PinState::High);
-    let mut line_5 = gpioa.pa10.into_open_drain_output_in_state(PinState::High);
+    let mut line_0 = gpioa.pa0.into_push_pull_output_in_state(PinState::High);
+    let mut line_1 = gpioa.pa1.into_push_pull_output_in_state(PinState::High);
+    let mut line_2 = gpioa.pa2.into_push_pull_output_in_state(PinState::High);
+    let mut line_3 = gpioa.pa3.into_push_pull_output_in_state(PinState::High);
+    let mut line_4 = gpioa.pa4.into_push_pull_output_in_state(PinState::High);
 
-    let mut col_0 = gpioa.pa0.into_pull_up_input();
-    let mut col_1 = gpioa.pa1.into_pull_up_input();
-    let mut col_2 = gpioa.pa2.into_pull_up_input();
-    let mut col_3 = gpioa.pa3.into_pull_up_input();
-    let mut col_4 = gpioa.pa4.into_pull_up_input();
-    let mut col_5 = gpioa.pa5.into_pull_up_input();
+    let mut col_0 = gpioa.pa15.into_pull_up_input();
+    let mut col_1 = gpiob.pb13.into_pull_up_input();
+    let mut col_2 = gpioc.pc13.into_pull_up_input();
+    let mut col_3 = gpioc.pc15.into_pull_up_input();
 
-    let cols: &mut [&mut dyn InputPin<Error = Infallible>] = &mut [
-        &mut col_0, &mut col_1, &mut col_2, &mut col_3, &mut col_4, &mut col_5,
-    ];
+    let cols: &mut [&mut dyn InputPin<Error = Infallible>] =
+        &mut [&mut col_0, &mut col_1, &mut col_2, &mut col_3];
 
     let lines: &mut [&mut dyn OutputPin<Error = Infallible>] = &mut [
         &mut line_0,
@@ -147,7 +154,6 @@ fn iterate_lines() -> ! {
         &mut line_2,
         &mut line_3,
         &mut line_4,
-        &mut line_5,
     ];
 
     let usb = USB {
@@ -168,41 +174,40 @@ fn iterate_lines() -> ! {
 
     let mut usb_dev = UsbDeviceBuilder::new(&usb_alloc, UsbVidPid(0x1209, 0x0001))
         .manufacturer("custom-keyboard-dwerner")
-        .product("Dan's Keyboard")
+        .product("Dan's Macro Keypad")
         .serial_number("42")
         .build();
 
-    let mut input_timer = dp.TIM2.counter_us(&clocks);
-    input_timer.start(10.millis()).unwrap();
+    let mut input_timer = dp.TIM3.counter_us(&clocks);
+    let mut tick_timer = dp.TIM1.counter_us(&clocks);
 
-    let mut tick_timer = dp.TIM3.counter_us(&clocks);
-    tick_timer.start(500.micros()).unwrap();
-
-    rprintln!("starting keyboard");
+    rprintln!("starting macro pad");
     loop {
         // All keys marked as being pressed during this pass.
-        let mut keys_pressed: [Keyboard; 6 * 6] = [Keyboard::NoEventIndicated; 6 * 6];
+        let mut keys_pressed: [Keyboard; 5 * 4] = [Keyboard::NoEventIndicated; 5 * 4];
 
-        for (line_index, line) in lines.iter_mut().enumerate() {
-            line.set_low().unwrap();
-
+        for (line_index, line) in lines.iter_mut().rev().enumerate() {
             // waiting here eliminates a ghost keypress of the next line.
+            line.set_low().unwrap();
+            tick_timer.start(1.millis()).unwrap();
             nb::block!(tick_timer.wait()).unwrap();
 
             for (col_index, col) in cols.iter().enumerate() {
-                keys_pressed[(col_index * 6) + line_index] = if col.is_low().unwrap() {
-                    // Ask the key mapping what key should be written.
-                    //let key = keys::LEFT_KEYS.mapping(line_index, col_index);
-                    let key = keys::RIGHT_KEYS.mapping(line_index, col_index);
+                keys_pressed[(col_index * 4) + line_index] = if col.is_low().unwrap() {
+                    let key = keys::MACRO_PAD_KEYS.mapping(line_index, col_index);
                     rprintln!("line: {} col: {} key {:?}", line_index, col_index, key);
                     key
                 } else {
                     Keyboard::NoEventIndicated
                 };
             }
+
             line.set_high().unwrap();
+            tick_timer.start(1.millis()).unwrap();
+            nb::block!(tick_timer.wait()).unwrap();
         }
 
+        input_timer.start(5.millis()).unwrap();
         nb::block!(input_timer.wait()).unwrap();
         match keyboard.interface().write_report(&keys_pressed) {
             Err(UsbHidError::WouldBlock) => {}
@@ -213,7 +218,8 @@ fn iterate_lines() -> ! {
             }
         }
 
-        nb::block!(tick_timer.wait()).unwrap();
+        input_timer.start(5.millis()).unwrap();
+        nb::block!(input_timer.wait()).unwrap();
         match keyboard.interface().tick() {
             Ok(()) => {}
             Err(UsbHidError::WouldBlock) => {}
