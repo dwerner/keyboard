@@ -73,7 +73,7 @@ mod keys {
             NoEventIndicated,
         ],
         [
-            Space,
+            F2,
             RightControl,
             LeftBrace,
             RightBrace,
